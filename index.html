@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Choplifter Game (HTML5)</title>
+    <style>
+        body { margin: 0; background: linear-gradient(to bottom, #222 0%, #444 100%); }
+        canvas { display: block; margin: 0 auto; background: linear-gradient(to top, #3a7bd5 0%, #00d2ff 100%); box-shadow: 0 0 24px #000a; border-radius: 12px; }
+        #score { color: #fff; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; font-size: 2em; margin-top: 10px; letter-spacing: 1px; text-shadow: 1px 1px 4px #000; }
+        #controls { color: #fff; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; font-size: 1em; margin-bottom: 10px; opacity: 0.85; }
+    </style>
+</head>
+<body>
+    <div id="score">Score: 0 | Rescued: 0</div>
+    <div id="controls">Arrows/WASD: Move &nbsp;|&nbsp; Space: Shoot &nbsp;|&nbsp; B: Drop Bomb &nbsp;|&nbsp; R: Restart &nbsp;|&nbsp; <button id="fullscreenBtn">Fullscreen</button></div>
+    <canvas id="gameCanvas" width="640" height="400"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+        fullscreenBtn.addEventListener('click', () => {
+            if (canvas.requestFullscreen) {
+                canvas.requestFullscreen();
+            } else if (canvas.webkitRequestFullscreen) {
+                canvas.webkitRequestFullscreen();
+            } else if (canvas.mozRequestFullScreen) {
+                canvas.mozRequestFullScreen();
+            } else if (canvas.msRequestFullscreen) {
+                canvas.msRequestFullscreen();
+            }
+        });
+
+        function resizeCanvas() {
+            if (document.fullscreenElement === canvas || document.webkitFullscreenElement === canvas || document.mozFullScreenElement === canvas || document.msFullscreenElement === canvas) {
+                canvas.width = window.screen.width;
+                canvas.height = window.screen.height;
+            } else {
+                canvas.width = 640;
+                canvas.height = 400;
+            }
+        }
+        document.addEventListener('fullscreenchange', resizeCanvas);
+        document.addEventListener('webkitfullscreenchange', resizeCanvas);
+        document.addEventListener('mozfullscreenchange', resizeCanvas);
+        document.addEventListener('MSFullscreenChange', resizeCanvas);
+        const ctx = canvas.getContext('2d');
+        const scoreDiv = document.getElementById('score');
+
+        // Game variables
+        let chopper = { x: 100, y: 200, width: 60, height: 24, vx: 0, vy: 0, dir: 1, speed: 3, carrying: 0 };
+        const WORLD_WIDTH = 2000;
+        const WORLD_HEIGHT = 400;
+        let cameraX = 0;
+        let gravity = 0.3;
+        let lift = -6;
+        let left = false, right = false, up = false, down = false;
+        let rescued = 0;
+        let score = 0;
+        let gameOver = false;
+        let hostages = [];
+        let bullets = [];
+        let enemies = [];
+        let frame = 0;
+        let enemyBullets = [];
+        let landingZone = { x: 20, y: 340, width: 80, height: 40 };
+        let enemyBase = { x: WORLD_WIDTH - 100, y: 340, width: 80, height: 40 };
+        const MAX_CARRY = 3;
+        let bombs = [];
+        let enemyChopper = {
+            x: WORLD_WIDTH - 300,
+            y: 120,
+            width: 60,
+            height: 24,
+            vx: 2,
+            vy: 0,
+            dir: -1,
+            shootCooldown: 0
+        };
+        let enemyChopperBullets = [];
+        const BOMB_COOLDOWN = 40;
+        let bombCooldown = 0;
+
+        function resetGame() {
+            chopper.x = 100; chopper.y = 200; chopper.vx = 0; chopper.vy = 0; chopper.carrying = 0;
+            rescued = 0; score = 0; gameOver = false; frame = 0;
+            hostages = [
+                {x: 500, y: 360, rescued: false},
+                {x: 540, y: 360, rescued: false},
+                {x: 580, y: 360, rescued: false},
+                {x: 620, y: 360, rescued: false},
+                {x: 1200, y: 360, rescued: false},
+                {x: 1400, y: 360, rescued: false},
+                {x: 1800, y: 360, rescued: false}
+            ];
+            bullets = [];
+            enemies = [
+                {x: 400, y: 360, width: 24, height: 24, vx: -1.5},
+                {x: 300, y: 360, width: 24, height: 24, vx: 1.2},
+                {x: 900, y: 360, width: 24, height: 24, vx: 1.5},
+                {x: 1600, y: 360, width: 24, height: 24, vx: -1.2}
+            ];
+            scoreDiv.textContent = `Score: ${score} | Rescued: ${rescued}`;
+            cameraX = 0;
+            enemyBullets = [];
+            enemyChopper.x = WORLD_WIDTH - 300;
+            enemyChopper.y = 120;
+            enemyChopper.vx = 2;
+            enemyChopper.dir = -1;
+            enemyChopper.shootCooldown = 0;
+            enemyChopperBullets = [];
+        }
+
+        function drawEnemyBase() {
+            ctx.save();
+            ctx.strokeStyle = '#f55';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(enemyBase.x, enemyBase.y, enemyBase.width, enemyBase.height);
+            ctx.font = 'bold 16px Arial';
+            ctx.fillStyle = '#f55';
+            ctx.fillText('ENEMY', enemyBase.x + 8, enemyBase.y + 28);
+            ctx.restore();
+        }
+
+        function drawEnemyChopper() {
+            ctx.save();
+            // Shadow
+            ctx.globalAlpha = 0.25;
+            ctx.beginPath();
+            ctx.ellipse(enemyChopper.x + enemyChopper.width/2, enemyChopper.y + enemyChopper.height + 10, enemyChopper.width/2, 8, 0, 0, Math.PI*2);
+            ctx.fillStyle = '#000';
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            // Body
+            ctx.fillStyle = '#f33';
+            ctx.fillRect(enemyChopper.x, enemyChopper.y, enemyChopper.width, enemyChopper.height);
+            // Cockpit
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(enemyChopper.x + 4, enemyChopper.y + 4, 14, enemyChopper.height - 8);
+            // Rotor
+            ctx.save();
+            ctx.translate(enemyChopper.x + enemyChopper.width/2, enemyChopper.y - 4);
+            ctx.rotate(Math.sin(frame/4) * 0.1);
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(-24, -3, 48, 6);
+            ctx.restore();
+            // Tail
+            ctx.fillStyle = '#333';
+            if (enemyChopper.dir === -1) ctx.fillRect(enemyChopper.x, enemyChopper.y + 8, 10, 8);
+            else ctx.fillRect(enemyChopper.x + enemyChopper.width - 10, enemyChopper.y + 8, 10, 8);
+            ctx.restore();
+        }
+
+        function drawEnemyChopperBullets() {
+            ctx.save();
+            ctx.fillStyle = '#0ff';
+            enemyChopperBullets.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, 4, 0, Math.PI*2);
+                ctx.fill();
+            });
+            ctx.restore();
+        }
+
+        function updateEnemyChopper() {
+            // Patrol horizontally between enemy base and 200px left of it
+            if (enemyChopper.x < enemyBase.x - 200) {
+                enemyChopper.vx = 2;
+                enemyChopper.dir = 1;
+            } else if (enemyChopper.x + enemyChopper.width > enemyBase.x + enemyBase.width) {
+                enemyChopper.vx = -2;
+                enemyChopper.dir = -1;
+            }
+            enemyChopper.x += enemyChopper.vx;
+            // Track player vertically if close
+            if (Math.abs(chopper.x - enemyChopper.x) < 300) {
+                if (chopper.y < enemyChopper.y - 2) enemyChopper.y -= 1.5;
+                else if (chopper.y > enemyChopper.y + 2) enemyChopper.y += 1.5;
+            }
+            // Shoot at player if in range and cooldown is 0
+            if (Math.abs(chopper.x - enemyChopper.x) < 350 && Math.abs(chopper.y - enemyChopper.y) < 80) {
+                if (enemyChopper.shootCooldown <= 0) {
+                    let dx = chopper.x + chopper.width/2 - (enemyChopper.x + enemyChopper.width/2);
+                    let dy = chopper.y + chopper.height/2 - (enemyChopper.y + enemyChopper.height/2);
+                    let mag = Math.sqrt(dx*dx + dy*dy);
+                    let vx = dx / mag * 7;
+                    let vy = dy / mag * 7;
+                    enemyChopperBullets.push({ x: enemyChopper.x + enemyChopper.width/2, y: enemyChopper.y + enemyChopper.height/2, vx, vy });
+                    enemyChopper.shootCooldown = 60;
+                }
+            }
+            if (enemyChopper.shootCooldown > 0) enemyChopper.shootCooldown--;
+        }
+
+        function updateEnemyChopperBullets() {
+            enemyChopperBullets.forEach(b => { b.x += b.vx; b.y += b.vy; });
+            for (let i = enemyChopperBullets.length - 1; i >= 0; i--) {
+                if (enemyChopperBullets[i].x < 0 || enemyChopperBullets[i].x > WORLD_WIDTH || enemyChopperBullets[i].y < 0 || enemyChopperBullets[i].y > WORLD_HEIGHT) {
+                    enemyChopperBullets.splice(i, 1);
+                }
+            }
+        }
+
+        function drawChopper() {
+            ctx.save();
+            // Shadow
+            ctx.globalAlpha = 0.25;
+            ctx.beginPath();
+            ctx.ellipse(chopper.x + chopper.width/2, chopper.y + chopper.height + 10, chopper.width/2, 8, 0, 0, Math.PI*2);
+            ctx.fillStyle = '#000';
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            // Body
+            ctx.fillStyle = '#0f0';
+            ctx.fillRect(chopper.x, chopper.y, chopper.width, chopper.height);
+            // Cockpit
+            ctx.fillStyle = '#0ff';
+            ctx.fillRect(chopper.x + chopper.width - 18, chopper.y + 4, 14, chopper.height - 8);
+            // Rotor
+            ctx.save();
+            ctx.translate(chopper.x + chopper.width/2, chopper.y - 4);
+            ctx.rotate(Math.sin(frame/4) * 0.1);
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(-24, -3, 48, 6);
+            ctx.restore();
+            // Tail
+            ctx.fillStyle = '#333';
+            if (chopper.dir === -1) ctx.fillRect(chopper.x, chopper.y + 8, 10, 8);
+            else ctx.fillRect(chopper.x + chopper.width - 10, chopper.y + 8, 10, 8);
+            // Carrying indicator
+            if (chopper.carrying > 0) {
+                ctx.fillStyle = '#ff0';
+                for (let i = 0; i < chopper.carrying; i++) {
+                    ctx.fillRect(chopper.x + 6 + i*12, chopper.y + chopper.height + 2, 8, 8);
+                }
+            }
+            ctx.restore();
+        }
+
+        function drawHostages() {
+            hostages.forEach(h => {
+                if (!h.rescued) {
+                    ctx.save();
+                    ctx.fillStyle = '#ff0';
+                    ctx.beginPath();
+                    ctx.arc(h.x + 5, h.y + 6, 5, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.fillRect(h.x + 2, h.y + 10, 6, 10);
+                    ctx.restore();
+                }
+            });
+        }
+
+        function drawLandingZone() {
+            ctx.save();
+            ctx.strokeStyle = '#0ff';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(landingZone.x, landingZone.y, landingZone.width, landingZone.height);
+            ctx.font = 'bold 16px Arial';
+            ctx.fillStyle = '#0ff';
+            ctx.fillText('BASE', landingZone.x + 12, landingZone.y + 28);
+            ctx.restore();
+        }
+
+        function drawBullets() {
+            ctx.save();
+            ctx.fillStyle = '#fff';
+            bullets.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x + 4, b.y + 1, 3, 0, Math.PI*2);
+                ctx.fill();
+            });
+            ctx.restore();
+        }
+
+        function drawBombs() {
+            ctx.save();
+            bombs.forEach(bomb => {
+                ctx.beginPath();
+                ctx.arc(bomb.x, bomb.y, 7, 0, Math.PI*2);
+                ctx.fillStyle = '#f90';
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(bomb.x, bomb.y, 4, 0, Math.PI*2);
+                ctx.fillStyle = '#333';
+                ctx.fill();
+            });
+            ctx.restore();
+        }
+
+        function drawEnemies() {
+            ctx.save();
+            enemies.forEach(e => {
+                // Tank body
+                ctx.fillStyle = '#f00';
+                ctx.fillRect(e.x, e.y + 8, e.width, e.height - 8);
+                // Tank turret
+                ctx.fillStyle = '#a00';
+                ctx.fillRect(e.x + 6, e.y, 12, 12);
+                // Barrel
+                ctx.fillStyle = '#888';
+                ctx.fillRect(e.x + 10, e.y - 6, 4, 10);
+            });
+            ctx.restore();
+        }
+
+        function drawEnemyBullets() {
+            ctx.save();
+            ctx.fillStyle = '#ff0';
+            enemyBullets.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, 4, 0, Math.PI*2);
+                ctx.fill();
+            });
+            ctx.restore();
+        }
+
+        function updateChopper() {
+            if (left) { chopper.vx = -chopper.speed; chopper.dir = -1; }
+            else if (right) { chopper.vx = chopper.speed; chopper.dir = 1; }
+            else chopper.vx = 0;
+            if (up) chopper.vy = lift;
+            else chopper.vy += gravity;
+            if (down) chopper.vy += 0.5;
+            chopper.x += chopper.vx;
+            chopper.y += chopper.vy;
+            // Boundaries
+            if (chopper.x < 0) chopper.x = 0;
+            if (chopper.x + chopper.width > WORLD_WIDTH) chopper.x = WORLD_WIDTH - chopper.width;
+            if (chopper.y < 0) chopper.y = 0;
+            if (chopper.y + chopper.height > WORLD_HEIGHT) chopper.y = WORLD_HEIGHT - chopper.height;
+        }
+
+        function updateBullets() {
+            bullets.forEach(b => b.x += b.vx);
+            // Remove offscreen
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                if (bullets[i].x > WORLD_WIDTH || bullets[i].x < 0) bullets.splice(i, 1);
+            }
+        }
+
+        function updateBombs() {
+            bombs.forEach(bomb => bomb.y += bomb.vy);
+            // Remove offscreen
+            for (let i = bombs.length - 1; i >= 0; i--) {
+                if (bombs[i].y > WORLD_HEIGHT) bombs.splice(i, 1);
+            }
+        }
+
+        function updateEnemies() {
+            enemies.forEach((e, idx) => {
+                e.x += e.vx;
+                if (e.x < 0 || e.x + e.width > WORLD_WIDTH) e.vx *= -1;
+                // Enemy shoots upwards every 120 frames, offset by index
+                if (!gameOver && frame % 120 === idx * 30 % 120) {
+                    enemyBullets.push({ x: e.x + e.width/2, y: e.y, vy: -6 });
+                }
+            });
+        }
+
+        function updateEnemyBullets() {
+            enemyBullets.forEach(b => b.y += b.vy);
+            // Remove offscreen
+            for (let i = enemyBullets.length - 1; i >= 0; i--) {
+                if (enemyBullets[i].y < 0) enemyBullets.splice(i, 1);
+            }
+        }
+
+        function checkCollisions() {
+            // Chopper with enemies
+            for (let e of enemies) {
+                if (rectsOverlap(chopper, e)) {
+                    gameOver = true;
+                    scoreDiv.textContent = `Game Over! Score: ${score} | Rescued: ${rescued} (R to restart)`;
+                }
+            }
+            // Chopper with enemy chopper
+            if (rectsOverlap(chopper, enemyChopper)) {
+                gameOver = true;
+                scoreDiv.textContent = `Game Over! Score: ${score} | Rescued: ${rescued} (R to restart)`;
+            }
+            // Chopper with enemy chopper bullets
+            for (let b of enemyChopperBullets) {
+                if (rectsOverlap(chopper, {x: b.x-4, y: b.y-4, width: 8, height: 8})) {
+                    gameOver = true;
+                    scoreDiv.textContent = `Game Over! Score: ${score} | Rescued: ${rescued} (R to restart)`;
+                }
+            }
+            // Chopper with enemy bullets
+            for (let b of enemyBullets) {
+                if (rectsOverlap(chopper, {x: b.x-4, y: b.y-4, width: 8, height: 8})) {
+                    gameOver = true;
+                    scoreDiv.textContent = `Game Over! Score: ${score} | Rescued: ${rescued} (R to restart)`;
+                }
+            }
+            // Bullets with enemies
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                for (let j = bullets.length - 1; j >= 0; j--) {
+                    if (rectsOverlap(enemies[i], bullets[j])) {
+                        enemies.splice(i, 1);
+                        bullets.splice(j, 1);
+                        score += 100;
+                        scoreDiv.textContent = `Score: ${score} | Rescued: ${rescued}`;
+                        break;
+                    }
+                }
+            }
+            // Bombs with enemies
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                for (let j = bombs.length - 1; j >= 0; j--) {
+                    if (rectsOverlap(enemies[i], {x: bombs[j].x-7, y: bombs[j].y-7, width: 14, height: 14})) {
+                        enemies.splice(i, 1);
+                        bombs.splice(j, 1);
+                        score += 150;
+                        scoreDiv.textContent = `Score: ${score} | Rescued: ${rescued}`;
+                        break;
+                    }
+                }
+            }
+            // Chopper with hostages
+            hostages.forEach(h => {
+                if (!h.rescued && chopper.carrying < MAX_CARRY && rectsOverlap(chopper, {x: h.x, y: h.y, width: 10, height: 20})) {
+                    h.rescued = true;
+                    chopper.carrying++;
+                }
+            });
+            // Chopper with landing zone
+            if (rectsOverlap(chopper, landingZone) && chopper.carrying > 0) {
+                rescued += chopper.carrying;
+                chopper.carrying = 0;
+                score += 200;
+                scoreDiv.textContent = `Score: ${score} | Rescued: ${rescued}`;
+            }
+        }
+
+        function rectsOverlap(a, b) {
+            return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Camera follows chopper, but clamps to world bounds
+            cameraX = Math.max(0, Math.min(chopper.x + chopper.width/2 - canvas.width/2, WORLD_WIDTH - canvas.width));
+            if (!gameOver) {
+                updateChopper();
+                updateBullets();
+                updateBombs();
+                updateEnemies();
+                updateEnemyBullets();
+                updateEnemyChopper();
+                updateEnemyChopperBullets();
+                checkCollisions();
+                drawWorld();
+                frame++;
+                if (bombCooldown > 0) bombCooldown--;
+                requestAnimationFrame(gameLoop);
+            } else {
+                drawWorld();
+            }
+        }
+
+        function drawWorld() {
+            // Draw ground
+            ctx.save();
+            ctx.fillStyle = '#2e2';
+            ctx.fillRect(0, WORLD_HEIGHT - 20, canvas.width, 20);
+            ctx.restore();
+            // Draw landing zone and enemy base
+            ctx.save();
+            ctx.translate(-cameraX, 0);
+            drawLandingZone();
+            drawEnemyBase();
+            drawHostages();
+            drawEnemies();
+            drawBullets();
+            drawBombs();
+            drawEnemyBullets();
+            drawEnemyChopper();
+            drawEnemyChopperBullets();
+            drawChopper();
+            ctx.restore();
+        }
+
+        function shoot() {
+            if (!gameOver) {
+                let bx = chopper.dir === 1 ? chopper.x + chopper.width : chopper.x - 8;
+                bullets.push({ x: bx, y: chopper.y + chopper.height / 2 - 1, vx: chopper.dir * 8, width: 8, height: 2 });
+            }
+        }
+
+        function dropBomb() {
+            if (!gameOver && bombCooldown === 0) {
+                bombs.push({ x: chopper.x + chopper.width/2, y: chopper.y + chopper.height, vy: 6 });
+                bombCooldown = BOMB_COOLDOWN;
+            }
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') left = true;
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') right = true;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW') up = true;
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') down = true;
+            if (e.code === 'Space') shoot();
+            if (e.code === 'KeyB') dropBomb();
+            if (e.code === 'KeyR' && gameOver) { resetGame(); gameLoop(); }
+        });
+        document.addEventListener('keyup', e => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') left = false;
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') right = false;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW') up = false;
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') down = false;
+        });
+
+        // Start game
+        resetGame();
+        gameLoop();
+    </script>
+</body>
+</html>
