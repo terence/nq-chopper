@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Choplifter Game (HTML5)</title>
     <style>
         body { margin: 0; background: linear-gradient(to bottom, #222 0%, #444 100%); -webkit-touch-callout: none; -webkit-user-select: none; }
@@ -13,10 +13,12 @@
         #score { color: #fff; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; font-size: 1.2rem; margin-top: 8px; letter-spacing: 1px; text-shadow: 1px 1px 4px #000; }
         #controls { color: #fff; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; font-size: 0.95rem; margin-bottom: 8px; opacity: 0.85; }
         /* Touch controls */
-        #touchControls { position: fixed; left: 0; right: 0; bottom: 12px; display: flex; justify-content: center; gap: 12px; pointer-events: none; }
+        #touchControls { position: fixed; left: 0; right: 0; bottom: 12px; display: flex; justify-content: center; gap: 12px; pointer-events: none; padding-bottom: env(safe-area-inset-bottom); }
         .touch-btn { pointer-events: auto; background: rgba(0,0,0,0.5); color: #fff; border: none; border-radius: 10px; padding: 14px; font-size: 18px; min-width: 56px; text-align: center; }
         .touch-btn:active { background: rgba(255,255,255,0.12); }
         .touch-group { display: flex; gap: 8px; align-items: center; }
+        /* Prevent default touch gestures on interactive elements */
+        .touch-btn, #canvasWrapper { touch-action: none; }
         @media (max-width: 600px) {
             #score { font-size: 1rem; }
             .touch-btn { padding: 12px; font-size: 16px; min-width: 48px; }
@@ -114,11 +116,21 @@
 
         function bindControl(el, onDown, onUp) {
             if (!el) return;
-            el.addEventListener('pointerdown', e => { e.preventDefault(); onDown(); });
-            ['pointerup','pointercancel','pointerout','pointerleave'].forEach(ev => el.addEventListener(ev, e => { e.preventDefault(); onUp(); }));
-            // support mouse as well
-            el.addEventListener('mousedown', e => { e.preventDefault(); onDown(); });
-            el.addEventListener('mouseup', e => { e.preventDefault(); onUp(); });
+            // Pointer events (modern browsers)
+            let activePointers = new Set();
+            function handlePointerDown(e) { e.preventDefault(); activePointers.add(e.pointerId); onDown(e); }
+            function handlePointerUp(e) { if (activePointers.has(e.pointerId)) { activePointers.delete(e.pointerId); e.preventDefault(); onUp(e); } }
+            el.addEventListener('pointerdown', handlePointerDown);
+            ['pointerup','pointercancel','pointerout','pointerleave'].forEach(ev => el.addEventListener(ev, handlePointerUp));
+            // Mouse fallback
+            el.addEventListener('mousedown', e => { e.preventDefault(); onDown(e); });
+            el.addEventListener('mouseup', e => { e.preventDefault(); onUp(e); });
+            // Touch fallback for older iOS: use non-passive listeners so we can prevent scrolling
+            function handleTouchStart(e) { e.preventDefault(); for (let t of e.changedTouches) { activePointers.add(t.identifier); onDown(e); } }
+            function handleTouchEnd(e) { for (let t of e.changedTouches) { if (activePointers.has(t.identifier)) { activePointers.delete(t.identifier); onUp(e); } } }
+            el.addEventListener('touchstart', handleTouchStart, { passive: false });
+            el.addEventListener('touchend', handleTouchEnd, { passive: false });
+            el.addEventListener('touchcancel', handleTouchEnd, { passive: false });
         }
 
         bindControl(btnLeft, () => left = true, () => left = false);
@@ -127,6 +139,91 @@
         bindControl(btnDown, () => down = true, () => down = false);
         bindControl(btnShoot, () => shoot(), () => {});
         bindControl(btnBomb, () => dropBomb(), () => {});
+
+                // Canvas gesture controls: drag to steer, tap to shoot, long-press to drop bomb
+                let touchPointerId = null;
+                let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+                let touchMoved = false; let longPressTimer = null;
+                const TAP_MAX_DIST = 12; // px
+                const TAP_MAX_TIME = 300; // ms
+                const LONG_PRESS_TIME = 450; // ms
+                const MOVE_THRESHOLD = 15; // px to start directional control
+
+                function clearTouchFlags() { left = right = up = down = false; }
+
+                function handlePointerDownStart(clientX, clientY) {
+                    touchStartX = clientX; touchStartY = clientY; touchStartTime = Date.now(); touchMoved = false;
+                    // set a long-press to drop bomb
+                    if (longPressTimer) clearTimeout(longPressTimer);
+                    longPressTimer = setTimeout(() => { dropBomb(); longPressTimer = null; }, LONG_PRESS_TIME);
+                }
+
+                function handlePointerMoveTo(clientX, clientY) {
+                    const dx = clientX - touchStartX, dy = clientY - touchStartY;
+                    if (Math.abs(dx) > MOVE_THRESHOLD || Math.abs(dy) > MOVE_THRESHOLD) {
+                        touchMoved = true;
+                        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+                    }
+                    left = dx < -MOVE_THRESHOLD;
+                    right = dx > MOVE_THRESHOLD;
+                    up = dy < -MOVE_THRESHOLD;
+                    down = dy > MOVE_THRESHOLD;
+                }
+
+                function handlePointerEnd(clientX, clientY) {
+                    const dt = Date.now() - touchStartTime;
+                    const dist = Math.hypot(clientX - touchStartX, clientY - touchStartY);
+                    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+                    if (!touchMoved && dt < TAP_MAX_TIME && dist < TAP_MAX_DIST) {
+                        // tap
+                        shoot();
+                    }
+                    clearTouchFlags();
+                }
+
+                // Pointer event handlers
+                canvas.addEventListener('pointerdown', e => {
+                    e.preventDefault();
+                    if (touchPointerId !== null) return;
+                    touchPointerId = e.pointerId;
+                    handlePointerDownStart(e.clientX, e.clientY);
+                });
+                canvas.addEventListener('pointermove', e => {
+                    if (e.pointerId !== touchPointerId) return;
+                    e.preventDefault();
+                    handlePointerMoveTo(e.clientX, e.clientY);
+                });
+                function pointerUpHandler(e) {
+                    if (e.pointerId !== touchPointerId) return;
+                    e.preventDefault();
+                    handlePointerEnd(e.clientX, e.clientY);
+                    touchPointerId = null;
+                }
+                canvas.addEventListener('pointerup', pointerUpHandler);
+                canvas.addEventListener('pointercancel', pointerUpHandler);
+
+                // Touch fallbacks for older iOS
+                canvas.addEventListener('touchstart', e => {
+                    e.preventDefault();
+                    if (touchPointerId !== null) return;
+                    const t = e.changedTouches[0];
+                    touchPointerId = t.identifier;
+                    handlePointerDownStart(t.clientX, t.clientY);
+                }, { passive: false });
+                canvas.addEventListener('touchmove', e => {
+                    e.preventDefault();
+                    const t = e.changedTouches[0];
+                    if (t.identifier !== touchPointerId) return;
+                    handlePointerMoveTo(t.clientX, t.clientY);
+                }, { passive: false });
+                canvas.addEventListener('touchend', e => {
+                    e.preventDefault();
+                    const t = e.changedTouches[0];
+                    if (t.identifier !== touchPointerId) return;
+                    handlePointerEnd(t.clientX, t.clientY);
+                    touchPointerId = null;
+                }, { passive: false });
+
 
         // Game variables
         let chopper = { x: 100, y: 200, width: 60, height: 24, vx: 0, vy: 0, dir: 1, speed: 3, carrying: 0 };
