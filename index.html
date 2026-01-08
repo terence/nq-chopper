@@ -259,7 +259,10 @@
             vx: 2,
             vy: 0,
             dir: -1,
-            shootCooldown: 0
+            shootCooldown: 0,
+            maxHealth: 150,
+            health: 150,
+            alive: true
         };
         let enemyChopperBullets = [];
         const BOMB_COOLDOWN = 40;
@@ -309,6 +312,8 @@
             enemyChopper.vx = 2;
             enemyChopper.dir = -1;
             enemyChopper.shootCooldown = 0;
+            enemyChopper.health = enemyChopper.maxHealth;
+            enemyChopper.alive = true;
             enemyChopperBullets = [];
         }
 
@@ -324,6 +329,18 @@
         }
 
         function drawEnemyChopper() {
+            if (!enemyChopper.alive) {
+                // wreck: small debris and smoke
+                ctx.save();
+                ctx.fillStyle = '#333';
+                ctx.fillRect(enemyChopper.x, enemyChopper.y, enemyChopper.width, enemyChopper.height);
+                ctx.fillStyle = 'rgba(80,80,80,0.9)';
+                ctx.beginPath();
+                ctx.ellipse(enemyChopper.x + enemyChopper.width/2, enemyChopper.y - 6, 12, 8, 0, 0, Math.PI*2);
+                ctx.fill();
+                ctx.restore();
+                return;
+            }
             ctx.save();
             // Shadow
             ctx.globalAlpha = 0.25;
@@ -349,6 +366,23 @@
             ctx.fillStyle = '#333';
             if (enemyChopper.dir === -1) ctx.fillRect(enemyChopper.x, enemyChopper.y + 8, 10, 8);
             else ctx.fillRect(enemyChopper.x + enemyChopper.width - 10, enemyChopper.y + 8, 10, 8);
+            // health bar
+            if (typeof enemyChopper.health !== 'undefined') {
+                const barW = enemyChopper.width;
+                const barH = 5;
+                const barX = enemyChopper.x;
+                const barY = Math.max(0, enemyChopper.y - barH - 6);
+                const pct = Math.max(0, Math.min(1, enemyChopper.health / enemyChopper.maxHealth));
+                ctx.fillStyle = '#222';
+                ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+                const r = Math.floor(255 * (1 - pct));
+                const g = Math.floor(200 * pct);
+                ctx.fillStyle = `rgb(${r},${g},20)`;
+                ctx.fillRect(barX, barY, Math.round(barW * pct), barH);
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(barX - 1, barY - 1, barW + 2, barH + 2);
+            }
             ctx.restore();
         }
 
@@ -364,6 +398,7 @@
         }
 
         function updateEnemyChopper() {
+            if (!enemyChopper.alive) return;
             // Patrol horizontally between enemy base and 200px left of it
             if (enemyChopper.x < enemyBase.x - 200) {
                 enemyChopper.vx = 2;
@@ -627,7 +662,42 @@
                     }
                 }
             }
+
+            // Bullets with enemy chopper
+            if (enemyChopper.alive) {
+                for (let j = bullets.length - 1; j >= 0; j--) {
+                    if (rectsOverlap(enemyChopper, bullets[j])) {
+                        bullets.splice(j, 1);
+                        enemyChopper.health -= 40;
+                        if (enemyChopper.health <= 0) {
+                            enemyChopper.alive = false;
+                            score += 500;
+                            updateHUD();
+                        } else {
+                            updateHUD();
+                        }
+                        break;
+                    }
+                }
+            }
             // Bombs with enemies
+            // Bombs with enemy chopper
+            if (enemyChopper.alive) {
+                for (let j = bombs.length - 1; j >= 0; j--) {
+                    if (rectsOverlap(enemyChopper, {x: bombs[j].x-7, y: bombs[j].y-7, width: 14, height: 14})) {
+                        bombs.splice(j, 1);
+                        enemyChopper.health -= 90;
+                        if (enemyChopper.health <= 0) {
+                            enemyChopper.alive = false;
+                            score += 500;
+                            updateHUD();
+                        } else {
+                            updateHUD();
+                        }
+                        break;
+                    }
+                }
+            }
             for (let i = enemies.length - 1; i >= 0; i--) {
                 for (let j = bombs.length - 1; j >= 0; j--) {
                     if (rectsOverlap(enemies[i], {x: bombs[j].x-7, y: bombs[j].y-7, width: 14, height: 14})) {
