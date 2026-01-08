@@ -253,6 +253,7 @@
         let enemySpawnTimer = 0;
         const ENEMY_SPAWN_INTERVAL = 300; // frames (~5s at 60fps)
         const MAX_ENEMIES_FROM_BASE = 6;
+        const BASE_RECOVER = 30; // health recovered when returning to base
         const MAX_CARRY = 3;
         let bombs = [];
         let enemyChopper = {
@@ -291,6 +292,7 @@
         function resetGame() {
             chopper.x = 100; chopper.y = 200; chopper.vx = 0; chopper.vy = 0; chopper.carrying = 0;
             chopper.health = chopper.maxHealth;
+            chopper.inBase = false;
             rescued = 0; score = 0; gameOver = false; frame = 0;
             hostages = [
                 {x: 500, y: 360, rescued: false},
@@ -736,12 +738,20 @@
                     chopper.carrying++;
                 }
             });
-            // Chopper with landing zone
-            if (rectsOverlap(chopper, landingZone) && chopper.carrying > 0) {
-                rescued += chopper.carrying;
-                chopper.carrying = 0;
-                score += 200;
-                updateHUD();
+            // Chopper with landing zone: rescue and heal when entering
+            if (rectsOverlap(chopper, landingZone)) {
+                if (chopper.carrying > 0) {
+                    rescued += chopper.carrying;
+                    chopper.carrying = 0;
+                    score += 200;
+                }
+                if (!chopper.inBase) {
+                    chopper.inBase = true;
+                    chopper.health = Math.min(chopper.maxHealth, (chopper.health || chopper.maxHealth) + BASE_RECOVER);
+                    updateHUD();
+                }
+            } else {
+                chopper.inBase = false;
             }
         }
 
