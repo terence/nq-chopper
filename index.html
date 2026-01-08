@@ -249,6 +249,10 @@
         let enemyBullets = [];
         let landingZone = { x: 20, y: 340, width: 80, height: 40 };
         let enemyBase = { x: WORLD_WIDTH - 100, y: 340, width: 80, height: 40 };
+        // Enemy base spawner settings
+        let enemySpawnTimer = 0;
+        const ENEMY_SPAWN_INTERVAL = 300; // frames (~5s at 60fps)
+        const MAX_ENEMIES_FROM_BASE = 6;
         const MAX_CARRY = 3;
         let bombs = [];
         let enemyChopper = {
@@ -614,6 +618,22 @@
             });
         }
 
+        // Spawn new ground units from the enemy base periodically
+        function updateEnemyBaseSpawner() {
+            if (gameOver) return;
+            enemySpawnTimer++;
+            if (enemySpawnTimer < ENEMY_SPAWN_INTERVAL) return;
+            enemySpawnTimer = 0;
+            // Count existing enemies near the base
+            const nearCount = enemies.filter(e => e.x > enemyBase.x - 200 && e.x < enemyBase.x + enemyBase.width + 200).length;
+            if (nearCount >= MAX_ENEMIES_FROM_BASE) return;
+            // Spawn a new tank near the base moving left
+            const spawnX = enemyBase.x + enemyBase.width - 10 + Math.random() * 40;
+            const spawnY = enemyBase.y + 20; // ground level is around 360 elsewhere
+            const vx = - (1.0 + Math.random() * 1.4);
+            enemies.push({ x: spawnX, y: spawnY, width: 24, height: 24, vx });
+        }
+
         function updateEnemyBullets() {
             enemyBullets.forEach(b => b.y += b.vy);
             // Remove offscreen
@@ -737,6 +757,7 @@
                 updateChopper();
                 updateBullets();
                 updateBombs();
+                updateEnemyBaseSpawner();
                 updateEnemies();
                 updateEnemyBullets();
                 updateEnemyChopper();
