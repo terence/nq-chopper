@@ -9,7 +9,7 @@
         /* Keep the canvas at its logical resolution and scale it to fit screens */
         #gameWrapper { display: flex; justify-content: center; align-items: center; padding: 12px; }
         #canvasWrapper { width: 640px; height: 400px; display: inline-block; position: relative; }
-        canvas { display: block; width: 640px; height: 400px; background: linear-gradient(to top, #3a7bd5 0%, #00d2ff 100%); box-shadow: 0 0 24px #000a; border-radius: 12px; transform-origin: top left; }
+        canvas { display: block; width: 640px; height: 400px; background: linear-gradient(to top, #3a7bd5 0%, #00d2ff 100%); box-shadow: 0 0 24px #000a; border-radius: 12px; transform-origin: top left; touch-action: none; -webkit-user-drag: none; }
         #score { color: #fff; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; font-size: 1.2rem; margin-top: 8px; letter-spacing: 1px; text-shadow: 1px 1px 4px #000; }
         #controls { color: #fff; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; font-size: 0.95rem; margin-bottom: 8px; opacity: 0.85; }
         /* Touch controls */
@@ -183,6 +183,7 @@
 
                 // Pointer event handlers
                 canvas.addEventListener('pointerdown', e => {
+                    console.log('pointerdown', e.pointerId, e.clientX, e.clientY);
                     e.preventDefault();
                     if (touchPointerId !== null) return;
                     touchPointerId = e.pointerId;
@@ -190,10 +191,12 @@
                 });
                 canvas.addEventListener('pointermove', e => {
                     if (e.pointerId !== touchPointerId) return;
+                    // logging move can be noisy; only log when moved significantly
                     e.preventDefault();
                     handlePointerMoveTo(e.clientX, e.clientY);
                 });
                 function pointerUpHandler(e) {
+                    console.log('pointerup', e.pointerId, e.clientX, e.clientY);
                     if (e.pointerId !== touchPointerId) return;
                     e.preventDefault();
                     handlePointerEnd(e.clientX, e.clientY);
@@ -204,6 +207,7 @@
 
                 // Touch fallbacks for older iOS
                 canvas.addEventListener('touchstart', e => {
+                    console.log('touchstart', e.changedTouches.length);
                     e.preventDefault();
                     if (touchPointerId !== null) return;
                     const t = e.changedTouches[0];
@@ -211,12 +215,14 @@
                     handlePointerDownStart(t.clientX, t.clientY);
                 }, { passive: false });
                 canvas.addEventListener('touchmove', e => {
+                    // don't spam logs on move
                     e.preventDefault();
                     const t = e.changedTouches[0];
                     if (t.identifier !== touchPointerId) return;
                     handlePointerMoveTo(t.clientX, t.clientY);
                 }, { passive: false });
                 canvas.addEventListener('touchend', e => {
+                    console.log('touchend', e.changedTouches.length);
                     e.preventDefault();
                     const t = e.changedTouches[0];
                     if (t.identifier !== touchPointerId) return;
