@@ -232,7 +232,7 @@
 
 
         // Game variables
-        let chopper = { x: 100, y: 200, width: 60, height: 24, vx: 0, vy: 0, dir: 1, speed: 3, carrying: 0 };
+        let chopper = { x: 100, y: 200, width: 60, height: 24, vx: 0, vy: 0, dir: 1, speed: 3, carrying: 0, maxHealth: 100 };
         const WORLD_WIDTH = 2000;
         const WORLD_HEIGHT = 400;
         let cameraX = 0;
@@ -265,8 +265,25 @@
         const BOMB_COOLDOWN = 40;
         let bombCooldown = 0;
 
+        function updateHUD() {
+            if (gameOver) return; // Game over message handled elsewhere
+            scoreDiv.textContent = `Score: ${score} | Rescued: ${rescued} | Health: ${chopper.health}`;
+        }
+
+        function damageChopper(amount) {
+            if (gameOver) return;
+            chopper.health = Math.max(0, (chopper.health || chopper.maxHealth) - amount);
+            if (chopper.health <= 0) {
+                gameOver = true;
+                scoreDiv.textContent = `Game Over! Score: ${score} | Rescued: ${rescued} (R to restart)`;
+            } else {
+                updateHUD();
+            }
+        }
+
         function resetGame() {
             chopper.x = 100; chopper.y = 200; chopper.vx = 0; chopper.vy = 0; chopper.carrying = 0;
+            chopper.health = chopper.maxHealth;
             rescued = 0; score = 0; gameOver = false; frame = 0;
             hostages = [
                 {x: 500, y: 360, rescued: false},
@@ -284,7 +301,7 @@
                 {x: 900, y: 360, width: 24, height: 24, vx: 1.5},
                 {x: 1600, y: 360, width: 24, height: 24, vx: -1.2}
             ];
-            scoreDiv.textContent = `Score: ${score} | Rescued: ${rescued}`;
+            updateHUD();
             cameraX = 0;
             enemyBullets = [];
             enemyChopper.x = WORLD_WIDTH - 300;
@@ -418,6 +435,26 @@
                     ctx.fillRect(chopper.x + 6 + i*12, chopper.y + chopper.height + 2, 8, 8);
                 }
             }
+                // Health bar
+                if (typeof chopper.health !== 'undefined') {
+                    const barW = chopper.width;
+                    const barH = 6;
+                    const barX = chopper.x;
+                    const barY = Math.max(0, chopper.y - barH - 6);
+                    const pct = Math.max(0, Math.min(1, chopper.health / chopper.maxHealth));
+                    // background
+                    ctx.fillStyle = '#222';
+                    ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+                    // health fill (green->red)
+                    const r = Math.floor(255 * (1 - pct));
+                    const g = Math.floor(200 * pct);
+                    ctx.fillStyle = `rgb(${r},${g},20)`;
+                    ctx.fillRect(barX, barY, Math.round(barW * pct), barH);
+                    // border
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(barX - 1, barY - 1, barW + 2, barH + 2);
+                }
             ctx.restore();
         }
 
@@ -551,30 +588,31 @@
         }
 
         function checkCollisions() {
-            // Chopper with enemies
-            for (let e of enemies) {
+            // Chopper with enemies (tanks)
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const e = enemies[i];
                 if (rectsOverlap(chopper, e)) {
-                    gameOver = true;
-                    scoreDiv.textContent = `Game Over! Score: ${score} | Rescued: ${rescued} (R to restart)`;
+                    damageChopper(40);
                 }
             }
-            // Chopper with enemy chopper
+            // Chopper with enemy chopper (big collision)
             if (rectsOverlap(chopper, enemyChopper)) {
-                gameOver = true;
-                scoreDiv.textContent = `Game Over! Score: ${score} | Rescued: ${rescued} (R to restart)`;
+                damageChopper(80);
             }
-            // Chopper with enemy chopper bullets
-            for (let b of enemyChopperBullets) {
+            // Chopper hit by enemy chopper bullets
+            for (let i = enemyChopperBullets.length - 1; i >= 0; i--) {
+                const b = enemyChopperBullets[i];
                 if (rectsOverlap(chopper, {x: b.x-4, y: b.y-4, width: 8, height: 8})) {
-                    gameOver = true;
-                    scoreDiv.textContent = `Game Over! Score: ${score} | Rescued: ${rescued} (R to restart)`;
+                    enemyChopperBullets.splice(i, 1);
+                    damageChopper(25);
                 }
             }
-            // Chopper with enemy bullets
-            for (let b of enemyBullets) {
+            // Chopper hit by ground enemies' bullets
+            for (let i = enemyBullets.length - 1; i >= 0; i--) {
+                const b = enemyBullets[i];
                 if (rectsOverlap(chopper, {x: b.x-4, y: b.y-4, width: 8, height: 8})) {
-                    gameOver = true;
-                    scoreDiv.textContent = `Game Over! Score: ${score} | Rescued: ${rescued} (R to restart)`;
+                    enemyBullets.splice(i, 1);
+                    damageChopper(15);
                 }
             }
             // Bullets with enemies
@@ -584,7 +622,7 @@
                         enemies.splice(i, 1);
                         bullets.splice(j, 1);
                         score += 100;
-                        scoreDiv.textContent = `Score: ${score} | Rescued: ${rescued}`;
+                            updateHUD();
                         break;
                     }
                 }
@@ -596,7 +634,7 @@
                         enemies.splice(i, 1);
                         bombs.splice(j, 1);
                         score += 150;
-                        scoreDiv.textContent = `Score: ${score} | Rescued: ${rescued}`;
+                            updateHUD();
                         break;
                     }
                 }
@@ -613,7 +651,7 @@
                 rescued += chopper.carrying;
                 chopper.carrying = 0;
                 score += 200;
-                scoreDiv.textContent = `Score: ${score} | Rescued: ${rescued}`;
+                updateHUD();
             }
         }
 
