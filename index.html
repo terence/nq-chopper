@@ -5,10 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Choplifter Game (HTML5)</title>
     <style>
-        body { margin: 0; background: linear-gradient(to bottom, #222 0%, #444 100%); }
-        canvas { display: block; margin: 0 auto; background: linear-gradient(to top, #3a7bd5 0%, #00d2ff 100%); box-shadow: 0 0 24px #000a; border-radius: 12px; }
-        #score { color: #fff; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; font-size: 2em; margin-top: 10px; letter-spacing: 1px; text-shadow: 1px 1px 4px #000; }
-        #controls { color: #fff; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; font-size: 1em; margin-bottom: 10px; opacity: 0.85; }
+        body { margin: 0; background: linear-gradient(to bottom, #222 0%, #444 100%); -webkit-touch-callout: none; -webkit-user-select: none; }
+        /* Keep the canvas at its logical resolution and scale it to fit screens */
+        #gameWrapper { display: flex; justify-content: center; align-items: center; padding: 12px; }
+        #canvasWrapper { width: 640px; height: 400px; display: inline-block; position: relative; }
+        canvas { display: block; width: 640px; height: 400px; background: linear-gradient(to top, #3a7bd5 0%, #00d2ff 100%); box-shadow: 0 0 24px #000a; border-radius: 12px; transform-origin: top left; }
+        #score { color: #fff; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; font-size: 1.2rem; margin-top: 8px; letter-spacing: 1px; text-shadow: 1px 1px 4px #000; }
+        #controls { color: #fff; font-family: 'Segoe UI', Arial, sans-serif; text-align: center; font-size: 0.95rem; margin-bottom: 8px; opacity: 0.85; }
+        /* Touch controls */
+        #touchControls { position: fixed; left: 0; right: 0; bottom: 12px; display: flex; justify-content: center; gap: 12px; pointer-events: none; }
+        .touch-btn { pointer-events: auto; background: rgba(0,0,0,0.5); color: #fff; border: none; border-radius: 10px; padding: 14px; font-size: 18px; min-width: 56px; text-align: center; }
+        .touch-btn:active { background: rgba(255,255,255,0.12); }
+        .touch-group { display: flex; gap: 8px; align-items: center; }
+        @media (max-width: 600px) {
+            #score { font-size: 1rem; }
+            .touch-btn { padding: 12px; font-size: 16px; min-width: 48px; }
+        }
     </style>
         <!-- Google tag (gtag.js) -->
         <script async src="https://www.googletagmanager.com/gtag/js?id=G-34RWEG01MV"></script>
@@ -26,10 +38,42 @@
 <body>
     <div id="score">Score: 0 | Rescued: 0</div>
     <div id="controls">Arrows/WASD: Move &nbsp;|&nbsp; Space: Shoot &nbsp;|&nbsp; B: Drop Bomb &nbsp;|&nbsp; R: Restart &nbsp;|&nbsp; <button id="fullscreenBtn">Fullscreen</button></div>
-    <canvas id="gameCanvas" width="640" height="400"></canvas>
+    <div id="gameWrapper">
+        <div id="canvasWrapper">
+            <canvas id="gameCanvas" width="640" height="400"></canvas>
+        </div>
+    </div>
+    <div id="touchControls" aria-hidden="false">
+        <div class="touch-group" id="dirGroup">
+            <button class="touch-btn" id="btnLeft">◀</button>
+            <button class="touch-btn" id="btnUp">▲</button>
+            <button class="touch-btn" id="btnDown">▼</button>
+            <button class="touch-btn" id="btnRight">▶</button>
+        </div>
+        <div class="touch-group" id="actionGroup">
+            <button class="touch-btn" id="btnShoot">Shoot</button>
+            <button class="touch-btn" id="btnBomb">Bomb</button>
+        </div>
+    </div>
     <script>
         const canvas = document.getElementById('gameCanvas');
+        const canvasWrapper = document.getElementById('canvasWrapper');
         const fullscreenBtn = document.getElementById('fullscreenBtn');
+        const GAME_WIDTH = 640, GAME_HEIGHT = 400;
+
+        function fitCanvas() {
+            // Keep logical resolution but scale visually to fit while preserving aspect
+            const scale = Math.min(window.innerWidth / GAME_WIDTH, (window.innerHeight - 120) / GAME_HEIGHT, 1);
+            canvas.style.transform = `scale(${scale})`;
+            // center the wrapper horizontally
+            canvasWrapper.style.width = (GAME_WIDTH * scale) + 'px';
+            canvasWrapper.style.height = (GAME_HEIGHT * scale) + 'px';
+        }
+
+        // Apply initial fit and on resize/orientation change
+        window.addEventListener('resize', fitCanvas);
+        window.addEventListener('orientationchange', () => { setTimeout(fitCanvas, 200); });
+        window.addEventListener('load', fitCanvas);
         fullscreenBtn.addEventListener('click', () => {
             if (canvas.requestFullscreen) {
                 canvas.requestFullscreen();
@@ -47,8 +91,10 @@
                 canvas.width = window.screen.width;
                 canvas.height = window.screen.height;
             } else {
-                canvas.width = 640;
-                canvas.height = 400;
+                // keep logical resolution; visual scaling handled by CSS transform
+                canvas.width = GAME_WIDTH;
+                canvas.height = GAME_HEIGHT;
+                fitCanvas();
             }
         }
         document.addEventListener('fullscreenchange', resizeCanvas);
@@ -57,6 +103,30 @@
         document.addEventListener('MSFullscreenChange', resizeCanvas);
         const ctx = canvas.getContext('2d');
         const scoreDiv = document.getElementById('score');
+
+        // Touch control elements
+        const btnLeft = document.getElementById('btnLeft');
+        const btnRight = document.getElementById('btnRight');
+        const btnUp = document.getElementById('btnUp');
+        const btnDown = document.getElementById('btnDown');
+        const btnShoot = document.getElementById('btnShoot');
+        const btnBomb = document.getElementById('btnBomb');
+
+        function bindControl(el, onDown, onUp) {
+            if (!el) return;
+            el.addEventListener('pointerdown', e => { e.preventDefault(); onDown(); });
+            ['pointerup','pointercancel','pointerout','pointerleave'].forEach(ev => el.addEventListener(ev, e => { e.preventDefault(); onUp(); }));
+            // support mouse as well
+            el.addEventListener('mousedown', e => { e.preventDefault(); onDown(); });
+            el.addEventListener('mouseup', e => { e.preventDefault(); onUp(); });
+        }
+
+        bindControl(btnLeft, () => left = true, () => left = false);
+        bindControl(btnRight, () => right = true, () => right = false);
+        bindControl(btnUp, () => up = true, () => up = false);
+        bindControl(btnDown, () => down = true, () => down = false);
+        bindControl(btnShoot, () => shoot(), () => {});
+        bindControl(btnBomb, () => dropBomb(), () => {});
 
         // Game variables
         let chopper = { x: 100, y: 200, width: 60, height: 24, vx: 0, vy: 0, dir: 1, speed: 3, carrying: 0 };
